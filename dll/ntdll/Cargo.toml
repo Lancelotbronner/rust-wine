@@ -1,0 +1,16 @@
+[package]
+name = "ntdll"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+crate-type = ["raw-dylib"]
+
+[features]
+SO_PASSCRED = []
+pipe2 = []
+
+[dependencies]
+libc = { workspace = true }
+log = { workspace = true }
+protocol = { workspace = true }

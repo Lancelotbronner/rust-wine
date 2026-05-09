@@ -1,0 +1,13 @@
+[package]
+name = "windows-kernel"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+libc = { workspace = true }
+errno = { workspace = true }
+mach-sys = { workspace = true }
+packed_ptr = { workspace = true }
+windows = { workspace = true }
+protocol = { workspace = true }
+log = "0.4.29"
