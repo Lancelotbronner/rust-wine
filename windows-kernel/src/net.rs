@@ -1,25 +1,30 @@
-use std::ffi::c_void;
-use std::mem;
-use std::os::fd::RawFd;
-use std::ptr::{null, null_mut};
-use std::time::Duration;
-use errno::errno;
-use libc::{c_int, c_long, c_short, close, kevent, kqueue, perror, pollfd, time_t, timespec, uintptr_t, ENOMEM, EVFILT_READ, EVFILT_WRITE, EV_ADD, EV_DELETE, EV_DISABLE, EV_ENABLE, NOTE_LOWAT, POLLIN, POLLOUT};
-use protocol::ptr::TaggedPtr;
 use crate::fd::WindowsFd;
 use crate::process::WindowsProcess;
+use crate::server::WineServer;
 use crate::thread::WindowsThread;
+use core::ffi::{c_int, c_long, c_short, c_void};
+use core::mem;
+use core::ptr::{null, null_mut};
+use core::time::Duration;
+use errno::errno;
+use libc::{
+	close, kevent, kqueue, perror, pollfd, time_t, timespec, uintptr_t, ENOMEM,
+	EVFILT_READ, EVFILT_WRITE, EV_ADD, EV_DELETE, EV_DISABLE, EV_ENABLE, EV_EOF, EV_ERROR, NOTE_LOWAT, POLLERR, POLLHUP,
+	POLLIN, POLLOUT,
+};
+use protocol::ptr::TaggedPtr;
+use std::os::fd::RawFd;
 
-pub struct EventWatch {
+pub struct SystemEvents {
     fd: c_int,
     pollfd: Vec<pollfd>,
 }
 
-impl EventWatch {
+impl SystemEvents {
     pub const fn invalid() -> Self {
-        EventWatch {
+        SystemEvents {
             fd: -1,
-            pollfd: Vec::new()
+            pollfd: Vec::new(),
         }
     }
 
@@ -28,34 +33,79 @@ impl EventWatch {
     }
 }
 
-impl Default for EventWatch {
+impl Default for SystemEvents {
     fn default() -> Self {
         let fd;
         #[cfg(target_os = "macos")]
         {
             fd = unsafe { kqueue() };
         }
-        EventWatch {
+        SystemEvents {
             fd,
             pollfd: Vec::new(),
         }
     }
 }
 
+pub trait SystemWatch {
+    fn revents_reset(&mut self);
+    fn revents_add(&mut self, event: c_short);
+    fn as_fd(&self) -> RawFd;
+    fn poll(&mut self, wine: &mut WineServer);
+}
+
 #[derive(Copy, Clone)]
 pub enum SystemWatcher {
-    Thread(*const WindowsThread),
-    Process(*const WindowsProcess),
-    Fd(*const WindowsFd),
+    Thread(*mut WindowsThread),
+    Process(*mut WindowsProcess),
+    Fd(*mut WindowsFd),
+}
+
+impl SystemWatch for SystemWatcher {
+    fn revents_reset(&mut self) {
+        match *self {
+            SystemWatcher::Thread(t) => unsafe { (*t).revents_reset() },
+            SystemWatcher::Process(p) => unsafe { (*p).revents_reset() },
+            SystemWatcher::Fd(fd) => unsafe { (*fd).revents_reset() },
+        }
+    }
+
+    fn revents_add(&mut self, event: c_short) {
+        match *self {
+            SystemWatcher::Thread(t) => unsafe { (*t).revents_add(event) },
+            SystemWatcher::Process(p) => unsafe { (*p).revents_add(event) },
+            SystemWatcher::Fd(fd) => unsafe { (*fd).revents_add(event) },
+        }
+    }
+
+    fn as_fd(&self) -> RawFd {
+        unsafe {
+            match *self {
+                SystemWatcher::Thread(t) => (*t).as_fd(),
+                SystemWatcher::Process(t) => (*t).as_fd(),
+                SystemWatcher::Fd(fd) => (*fd).as_fd(),
+            }
+        }
+    }
+
+    fn poll(&mut self, wine: &mut WineServer) {
+        unsafe {
+            match *self {
+                SystemWatcher::Thread(t) => (*t).poll(wine),
+                SystemWatcher::Process(t) => (*t).poll(wine),
+                SystemWatcher::Fd(fd) => (*fd).poll(wine),
+            }
+        }
+    }
 }
 
 impl SystemWatcher {
     pub fn unpack(ptr: *const c_void) -> Self {
         let tagged = TaggedPtr::unpack(ptr);
         match tagged.data() {
-            0u8 => SystemWatcher::Thread(tagged.ptr() as *const WindowsThread),
-            1u8 => SystemWatcher::Fd(tagged.ptr() as *const WindowsFd),
-            2u8 => SystemWatcher::Fd(tagged.ptr() as *const WindowsFd),
+            0u8 => SystemWatcher::Thread(tagged.ptr() as *mut WindowsThread),
+            1u8 => SystemWatcher::Fd(tagged.ptr() as *mut WindowsFd),
+            2u8 => SystemWatcher::Fd(tagged.ptr() as *mut WindowsFd),
             _ => todo!(),
         }
     }
@@ -79,27 +129,17 @@ impl SystemWatcher {
     pub fn packed(self) -> TaggedPtr<(), u8> {
         TaggedPtr::pack(self.into_ptr(), self.tag())
     }
-
-    pub fn fd(self) -> RawFd {
-        unsafe {
-            match self {
-                SystemWatcher::Thread(t) => (*t).request_fd(),
-                SystemWatcher::Process(t) => (*t).fd(),
-                SystemWatcher::Fd(fd) => (*fd).unix,
-            }
-        }
-    }
 }
 
 #[cfg(target_os = "macos")]
-impl EventWatch {
+impl SystemEvents {
     pub fn init(&mut self) {
         self.fd = unsafe { kqueue() };
     }
 
     pub fn reads_watch(&mut self, watcher: SystemWatcher) {
         let ev = kevent {
-            ident: watcher.fd() as uintptr_t,
+            ident: watcher.as_fd() as uintptr_t,
             filter: EVFILT_READ,
             flags: EV_ADD | EV_ENABLE,
             fflags: NOTE_LOWAT,
@@ -111,7 +151,7 @@ impl EventWatch {
 
     pub fn reads_cancel(&mut self, watcher: SystemWatcher) {
         let ev = kevent {
-            ident: watcher.fd() as uintptr_t,
+            ident: watcher.as_fd() as uintptr_t,
             filter: EVFILT_READ,
             flags: EV_DELETE,
             fflags: NOTE_LOWAT,
@@ -225,9 +265,11 @@ impl EventWatch {
         self.apply(&ev);
     }
 
-    pub fn poll(&self, timeout: Option<Duration>) -> EventIter {
+    const BUFFER: usize = 128;
+
+    pub fn poll(&self, timeout: Option<Duration>) -> Vec<SystemWatcher> {
         if self.fd == -1 {
-            return EventIter::EMPTY;
+            return vec![];
         }
         let timeout = timeout
             .map(|t| timespec {
@@ -237,46 +279,35 @@ impl EventWatch {
             .as_ref()
             .map(|r| r as *const timespec)
             .unwrap_or(null());
-        let mut iter = EventIter::EMPTY;
-        iter.count = unsafe {
+        let mut buffer: [kevent; Self::BUFFER] = unsafe { mem::zeroed() };
+        let count = unsafe {
             kevent(
                 self.fd,
                 null(),
                 0,
-                &mut iter.events as *mut kevent,
-                EventIter::BUFFER as c_int,
+                &mut buffer as *mut kevent,
+                SystemEvents::BUFFER as c_int,
                 timeout,
             )
-        };
-        iter
-    }
-}
-
-pub struct EventIter {
-    events: [kevent; EventIter::BUFFER],
-    count: c_int,
-    i: c_int,
-}
-
-impl EventIter {
-    const EMPTY: EventIter = unsafe { mem::zeroed() };
-    const BUFFER: usize = 128;
-
-    pub fn reset(&mut self) {
-        self.i = 0
-    }
-}
-
-impl Iterator for EventIter {
-    type Item = kevent;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.i == self.count {
-            None
-        } else {
-            let event = self.events[self.i as usize];
-            self.i += 1;
-            Some(event)
-        }
+        } as usize;
+        buffer[..count]
+            .iter()
+            .map(|event| {
+                let mut watcher = SystemWatcher::unpack(event.udata);
+                watcher.revents_reset();
+                match event.filter {
+                    EVFILT_READ => watcher.revents_add(POLLIN),
+                    EVFILT_WRITE => watcher.revents_add(POLLOUT),
+                    _ => (),
+                }
+                if event.flags & EV_EOF != 0 {
+                    watcher.revents_add(POLLHUP);
+                }
+                if event.flags & EV_ERROR != 0 {
+                    watcher.revents_add(POLLERR);
+                }
+                watcher
+            })
+            .collect()
     }
 }

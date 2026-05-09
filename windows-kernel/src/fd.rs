@@ -1,26 +1,11 @@
-use crate::thread::WindowsThread;
-use errno::errno;
-use libc::{
-    c_int, c_long, c_short, close, kevent, kqueue, perror, pollfd,
-    time_t, timespec, uintptr_t, ENOMEM, EVFILT_READ, EVFILT_WRITE, EV_ADD, EV_DELETE, EV_DISABLE, EV_ENABLE, NOTE_LOWAT,
-    POLLIN, POLLOUT,
-};
-use std::ffi::c_void;
-use std::mem;
+use crate::net::SystemWatch;
+use crate::server::WineServer;
+use core::ffi::c_short;
 use std::os::fd::RawFd;
-use std::ptr::{null, null_mut};
-use std::rc::Rc;
-use std::thread::Thread;
-use std::time::Duration;
-use packed_ptr::{PackedPtr, TypedPackedPtr};
-use packed_ptr::config::AlignOnly;
-use protocol::ptr::TaggedPtr;
 
 pub struct WindowsFd {
     /// Unix file descriptor.
-    pub(crate) unix: RawFd,
-    /// File descriptor operations
-    ops: &'static WindowsFdOps,
+    unix: RawFd,
     // struct object        obj;         /* object header */
     // const struct fd_ops *fd_ops;      /*  */
     // struct object       *sync;        /* sync object for wait/signal */
@@ -47,15 +32,23 @@ pub struct WindowsFd {
     // struct completion   *completion;  /* completion object attached to this fd */
     // apc_param_t          comp_key;    /* completion key to set in completion events */
     // unsigned int         comp_flags;  /* completion flags */
+    revents: c_short,
 }
 
-impl WindowsFd {
-    pub fn poll(&self, event: c_short) {
-        (self.ops.poll_event)(self, event);
+impl SystemWatch for WindowsFd {
+    fn revents_reset(&mut self) {
+        self.revents = 0;
     }
+
+    fn revents_add(&mut self, event: c_short) {
+        self.revents |= event;
+    }
+
+    fn as_fd(&self) -> RawFd {
+        self.unix
+    }
+
+    fn poll(&mut self, wine: &mut WineServer) {}
 }
 
-struct WindowsFdOps {
-    /// a poll() event occurred
-    pub poll_event: fn(fd: &WindowsFd, event: c_short),
-}
+impl WindowsFd {}

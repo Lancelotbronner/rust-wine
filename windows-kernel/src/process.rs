@@ -1,13 +1,14 @@
+use crate::net::SystemWatch;
 use crate::server::WineServer;
 use crate::thread::WindowsThread;
+use core::ffi::{c_short, c_uint, c_void};
+use core::ptr::null_mut;
 use libc::{
-    c_uint, cmsghdr, iovec, msghdr, sendmsg, socklen_t, CMSG_DATA,
-    CMSG_FIRSTHDR, CMSG_LEN, SCM_RIGHTS, SOL_SOCKET,
+	cmsghdr, iovec, msghdr, sendmsg, socklen_t, CMSG_DATA, CMSG_FIRSTHDR, CMSG_LEN, POLLERR,
+	POLLHUP, POLLIN, SCM_RIGHTS, SOL_SOCKET,
 };
-use std::ffi::c_void;
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
-use std::ptr::null_mut;
 use std::rc::Rc;
 
 #[derive(Copy, Clone)]
@@ -18,7 +19,30 @@ pub struct WindowsProcess {
     pid: WindowsPid,
     parent: Option<Rc<WindowsProcess>>,
     threads: Vec<Rc<WindowsThread>>,
-    pub(crate) is_terminating: bool,
+    is_terminating: bool,
+    revents: c_short,
+}
+
+impl SystemWatch for WindowsProcess {
+    fn revents_reset(&mut self) {
+        self.revents = 0;
+    }
+
+    fn revents_add(&mut self, event: c_short) {
+        self.revents |= event;
+    }
+
+    fn as_fd(&self) -> RawFd {
+        self.fd.as_raw_fd()
+    }
+
+    fn poll(&mut self, _wine: &mut WineServer) {
+        if (self.revents & (POLLERR | POLLHUP) != 0) {
+            self.kill(!self.is_terminating);
+        } else if (self.revents & POLLIN != 0) {
+            self.receive_fd();
+        }
+    }
 }
 
 impl WindowsProcess {
@@ -29,15 +53,12 @@ impl WindowsProcess {
             parent: None,
             threads: Vec::new(),
             is_terminating: false,
+            revents: 0,
         }
     }
 
     pub fn add_thread(&mut self, thread: Rc<WindowsThread>) {
         self.threads.push(thread);
-    }
-
-    pub fn fd(&self) -> RawFd {
-        self.fd.as_raw_fd()
     }
 
     const CMSG_BUFFER: usize = 256;

@@ -1,12 +1,11 @@
-use std::cmp::{max, min};
-use libc::{free, gettimeofday, timespec, timeval, INT_MAX};
+use core::cmp::{max, min};
+use core::mem;
+use core::ptr::null_mut;
+use core::time::Duration;
+use libc::{gettimeofday, timeval};
 use mach_sys::mach_time::{mach_continuous_time, mach_timebase_info, mach_timebase_info_data_t};
 use protocol::{AbsoluteTime, Timeout};
 use std::collections::LinkedList;
-use std::ffi::c_int;
-use std::mem;
-use std::ptr::null_mut;
-use std::time::Duration;
 
 #[derive(Default)]
 pub struct Clock {
@@ -97,12 +96,16 @@ impl Clock {
 
         // Remove all expired timers from the list
         let mut cursor = self.abs.cursor_back_mut();
-        while let Some(entry) = cursor.current() && entry.when.0 <= self.current_time.0 {
+        while let Some(entry) = cursor.current()
+            && entry.when.0 <= self.current_time.0
+        {
             expired.push(entry.callback);
             cursor.remove_current();
         }
         cursor = self.rel.cursor_back_mut();
-        while let Some(entry) = cursor.current() && -entry.when.0 <= self.monotonic_time.0 {
+        while let Some(entry) = cursor.current()
+            && -entry.when.0 <= self.monotonic_time.0
+        {
             expired.push(entry.callback);
             cursor.remove_current();
         }

@@ -1,12 +1,9 @@
 use crate::clock::Clock;
 use crate::fd::WindowsFd;
-use crate::net::{EventWatch, SystemWatcher};
+use crate::net::{SystemEvents, SystemWatch, SystemWatcher};
 use crate::process::{WindowsPid, WindowsProcess};
 use crate::thread::{WindowsThread, WindowsTid};
-use libc::{
-    c_int, c_short, nfds_t, poll, pollfd, unlink, EVFILT_READ, EVFILT_WRITE, EV_EOF, EV_ERROR,
-    POLLERR, POLLHUP, POLLIN, POLLOUT,
-};
+use libc::{pollfd, unlink};
 use protocol::socket::WineSocket;
 use std::ffi::CString;
 use std::fs::create_dir_all;
@@ -18,7 +15,7 @@ use std::str::FromStr;
 
 pub struct WineServer {
     listener: UnixListener,
-    watch: EventWatch,
+    watch: SystemEvents,
     poll_users: Vec<*mut WindowsFd>,
     pollfd: Vec<pollfd>,
     clock: Clock,
@@ -39,7 +36,7 @@ impl WineServer {
         }
         let server = WineServer {
             listener: UnixListener::bind(path)?,
-            watch: EventWatch::default(),
+            watch: SystemEvents::default(),
             poll_users: Vec::new(),
             pollfd: Vec::new(),
             clock: Clock::default(),
@@ -54,7 +51,6 @@ impl WineServer {
         loop {
             println!("loop");
             self.poll_system();
-            self.poll_clients();
             self.accept_clients();
         }
     }
@@ -66,46 +62,18 @@ impl WineServer {
             if self.poll_users.is_empty() || !self.watch.is_valid() {
                 break;
             }
-            let mut iter = self.watch.poll(timeout);
+            let events = self.watch.poll(timeout);
             self.clock.set_current_time();
 
-            // Put the events into the pollfd array first, like poll does
-            for event in &mut iter {
-                let user = event.udata as usize;
-                let pollfd = &mut self.pollfd[user];
-                pollfd.revents = 0;
-                match event.filter {
-                    EVFILT_READ => pollfd.revents |= POLLIN,
-                    EVFILT_WRITE => pollfd.revents |= POLLOUT,
-                    _ => (),
-                }
-                if event.flags & EV_EOF != 0 {
-                    pollfd.revents |= POLLHUP;
-                }
-                if event.flags & EV_ERROR != 0 {
-                    pollfd.revents |= POLLERR;
-                }
-            }
-
-            // Read events from the pollfd array, as set_fd_events may modify them
-            iter.reset();
-            for event in iter {
-                let user = event.udata as usize;
-
-                if self.pollfd[user].revents != 0 {
-                    let watcher = SystemWatcher::unpack(event.udata);
-                    match watcher {
-                        SystemWatcher::Thread(t) => self.poll_thread(unsafe { &*t }),
-                        SystemWatcher::Process(p) => self.poll_process(unsafe { &*p }, self.pollfd[user].revents),
-                        SystemWatcher::Fd(fd) => self.poll_fd(unsafe { &*fd }),
-                    }
-                    self.pollfd[user].revents = 0;
-                }
+            for mut watcher in events {
+                watcher.poll(self);
+                watcher.revents_reset();
             }
         }
     }
 
-    fn poll_clients(&mut self) {
+    /*
+    fn poll_backup(&mut self) {
         //TODO: This is the backup system in case system events fail?
         while !self.poll_users.is_empty() {
             let timeout = self
@@ -143,18 +111,7 @@ impl WineServer {
             }
         }
     }
-
-    fn poll_thread(&mut self, thread: &WindowsThread) {}
-
-    fn poll_process(&mut self, process: &WindowsProcess, event: c_short) {
-        if (event & (POLLERR | POLLHUP) != 0) {
-            process.kill(!process.is_terminating);
-        } else if (event & POLLIN != 0) {
-            process.receive_fd();
-        }
-    }
-
-    fn poll_fd(&mut self, fd: &WindowsFd) {}
+     */
 
     fn accept_clients(&mut self) {
         self.listener
@@ -178,7 +135,7 @@ impl WineServer {
             .unwrap()
             .add_thread(thread.clone());
         self.watch.reads_watch(SystemWatcher::Thread(
-            thread.as_ref() as *const WindowsThread
+            thread.as_ref() as *const WindowsThread as *mut WindowsThread,
         ));
         Ok(())
     }

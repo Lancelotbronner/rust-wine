@@ -1,7 +1,7 @@
-use std::ffi::c_void;
-use std::process::exit;
-use std::ptr::null;
 use crate::preload::preload_info;
+use core::ffi::c_void;
+use core::ptr::null;
+use std::process::exit;
 
 #[derive(Copy, Clone)]
 pub struct WinePreloadInfo {
@@ -37,11 +37,11 @@ mod preload {
     (the only way to prevent system frameworks from using them, including allocations
     before main() runs).
     */
-    use crate::WinePreloadInfo;
-    use std::ffi::c_void;
-    use std::ptr::null;
+	use crate::WinePreloadInfo;
+	use std::ffi::c_void;
+	use std::ptr::null;
 
-    #[unsafe(link_section = "WINE_RESERVE,WINE_RESERVE")]
+	#[unsafe(link_section = "WINE_RESERVE,WINE_RESERVE")]
     static __wine_reserve: [u8; 0x1fffff000] = [0; 0x1fffff000];
 
     #[unsafe(link_section = "WINE_TOP_DOWN,WINE_TOP_DOWN")]

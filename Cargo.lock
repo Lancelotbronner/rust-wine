@@ -29,7 +29,7 @@ version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
- "libc 0.2.186",
+ "libc",
  "windows-sys",
 ]
 
@@ -67,12 +67,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
-name = "libc"
-version = "1.0.0-alpha.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e136bfa874086c78f34d6eba98c423fefe464ce57f38164d16893ba8ed358e70"
-
-[[package]]
 name = "loader"
 version = "0.0.0"
 
@@ -101,7 +95,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 name = "ntdll"
 version = "0.0.0"
 dependencies = [
- "libc 1.0.0-alpha.3",
+ "libc",
  "log",
  "protocol",
 ]
@@ -129,7 +123,7 @@ name = "protocol"
 version = "0.1.0"
 dependencies = [
  "const_format",
- "libc 1.0.0-alpha.3",
+ "libc",
  "serde",
  "serde_json",
 ]
@@ -224,7 +218,7 @@ name = "windows-kernel"
 version = "0.0.0"
 dependencies = [
  "errno",
- "libc 1.0.0-alpha.3",
+ "libc",
  "log",
  "mach-sys",
  "packed_ptr",
