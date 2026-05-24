@@ -132,8 +132,9 @@ impl WineServer {
         let thread = Rc::new(WindowsThread::primary_for(process.clone(), tid)?);
         self.threads.push(thread.clone());
         Rc::get_mut(&mut process)
-            .unwrap()
-            .add_thread(thread.clone());
+			.unwrap()
+			.add_thread(thread.clone())
+			.expect("failed to init main thread for new process");
         self.watch.reads_watch(SystemWatcher::Thread(
             thread.as_ref() as *const WindowsThread as *mut WindowsThread,
         ));

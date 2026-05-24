@@ -1,6 +1,9 @@
+#![feature(unix_socket_ancillary_data)]
+
 pub mod ptr;
 pub mod socket;
 
+use std::io;
 use serde::{Deserialize, Serialize};
 
 pub const SERVER_PROTOCOL_VERSION: i32 = 1;
@@ -13,9 +16,29 @@ pub enum WineRequest {
     Ping,
 }
 
+impl WineRequest {
+	pub fn write_to<W: io::Write>(&self, writer: &mut W) {
+		serde_json::to_writer(writer, self).expect("failed to write request");
+	}
+
+	pub fn read_from<R: io::Read>(reader: &mut R) -> Self {
+		serde_json::from_reader(reader).expect("failed to read request")
+	}
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WineReply {
     Pong,
+}
+
+impl WineReply {
+	pub fn write_to<W: io::Write>(&self, writer: &mut W) {
+		serde_json::to_writer(writer, self).expect("failed to write reply");
+	}
+
+	pub fn read_from<R: io::Read>(reader: &mut R) -> Self {
+		serde_json::from_reader(reader).expect("failed to read reply")
+	}
 }
 
 /// NT-style timeout, in 100ns units, negative means relative timeout
