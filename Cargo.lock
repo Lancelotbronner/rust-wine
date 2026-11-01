@@ -126,6 +126,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "unix-ancillary",
 ]
 
 [[package]]
@@ -208,6 +209,15 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unix-ancillary"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b8acd22a6c7aa27eb5b947514b22601274a86d56fe671ec1e15960e536d6d6d"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "windows"

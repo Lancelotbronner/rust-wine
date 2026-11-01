@@ -4,7 +4,7 @@ use crate::net::{SystemEvents, SystemWatch, SystemWatcher};
 use crate::process::{WindowsPid, WindowsProcess};
 use crate::thread::{WindowsThread, WindowsTid};
 use libc::{pollfd, unlink};
-use protocol::socket::WineSocket;
+use protocol::socket::KernelSocket;
 use std::ffi::CString;
 use std::fs::create_dir_all;
 use std::io;
@@ -26,7 +26,7 @@ pub struct WineServer {
 impl WineServer {
     /// Creates a new server.
     pub fn new(name: &str) -> io::Result<WineServer> {
-        let path = format!("{}/{name}", WineSocket::PATH);
+        let path = format!("{}/{name}", KernelSocket::PATH);
         println!("Creating Windows kernel at '{path}'");
         if let Some(parent) = Path::new(path.as_str()).parent() {
             create_dir_all(parent)?;

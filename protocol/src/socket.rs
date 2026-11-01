@@ -4,27 +4,28 @@ use std::env::consts::ARCH;
 use std::io;
 use std::io::{IoSlice, IoSliceMut};
 use std::mem::transmute;
-use std::os::fd::{BorrowedFd, FromRawFd, OwnedFd};
-use std::os::unix::net::{AncillaryData, SocketAncillary, UnixStream};
+use std::os::fd::{BorrowedFd, OwnedFd};
+use std::os::unix::net::UnixStream;
+use unix_ancillary::{AncillaryData, SocketAncillary};
 
 /// Connects to the Windows "kernel" socket.
-pub struct WineSocket {
+pub struct KernelSocket {
     /// Process socket to exchange file descriptors with the server.
     process: UnixStream,
     /// Thread sockets.
     threads: Vec<UnixStream>,
 }
 
-impl WineSocket {
+impl KernelSocket {
     /// The path to the Windows "kernel" socket.
     pub const PATH: &'static str = concatcp!("/tmp/wine/", ARCH);
 
-    pub fn new(name: &str) -> io::Result<WineSocket> {
-        let process = UnixStream::connect(format!("{}/{name}", WineSocket::PATH))?;
+    pub fn new(name: &str) -> io::Result<KernelSocket> {
+        let process = UnixStream::connect(format!("{}/{name}", KernelSocket::PATH))?;
         let fds = recv_fds_from(&process)?;
         assert_eq!(fds.len(), 1);
         let threads = fds.iter().map(UnixStream::from).collect();
-        Ok(WineSocket { process, threads })
+        Ok(KernelSocket { process, threads })
         //TODO: connect, receive process FD, receive first thread fd
     }
 
